@@ -6,11 +6,13 @@
 
 int main(void)
 {
+    // Timer0
+
     // Config compare TOP and BOTTOM to width pulse
     OCR2A = 125;
     OCR2B = 50;
 
-    // Config Timer0 Fast PWM mode
+    // Fast PWM mode
     TCCR2A = (1 << WGM20) | (1 << WGM21) | (1 << COM2B1);
     TCCR2B = (1 << WGM22);
 
@@ -19,6 +21,9 @@ int main(void)
 
     // Config output pin to PWM
     DDRD = (1 << PD3);
+
+    // Config PORTB as output to display
+    DDRB = 0xFF;
 
     while (1)
     {
