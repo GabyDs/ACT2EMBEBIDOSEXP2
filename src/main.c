@@ -18,6 +18,7 @@
 #include <lcd_328P.h>
 // -------------------- DISPLAY LCD --------------------
 
+#define PWM_PERIOD 125 // 125 * 64 * (1/16MHz) = 500us -> f = 2kHz
 #define PWM_OUTPUT PD3
 #define P1 PD2 // on/off motor
 #define P2 PD1 // entert to config mode
@@ -31,6 +32,11 @@
 volatile uint8_t on_off_flag = 0; // 1 -> ON / 0 -> OFF
 volatile uint8_t config_T = 1;    // 1 -> T1 / 0 -> T2
 
+volatile float duration_up = 100; // * 100ms
+volatile uint8_t duration_down = 200;
+volatile uint8_t dutyCycle1 = 40;
+volatile uint8_t dutyCycle2 = 95;
+
 char buffer[16]; // character array that stores strings (16 = Number of LCD rows)
 
 uint8_t last_config_state = 1;
@@ -42,6 +48,7 @@ uint8_t time_select_state;
 
 void configuration_mode();
 void home_display();
+void updateLCD_configMode();
 
 ISR(INT0_vect)
 {
@@ -54,15 +61,13 @@ int main(void)
 {
 
     // timer to PWM signal
-    OCR2A = 125; // register that allows for modifying frecuency of the PWM signal
-    OCR2B = 50;  // register that allows for modifying the pulse width of the PWM signal
+    OCR2A = PWM_PERIOD; // register that allows for modifying frecuency of the PWM signal
+    OCR2B = 50;         // register that allows for modifying the pulse width of the PWM signal
 
     // fast PWM mode
     TCCR2A = (1 << WGM20) | (1 << WGM21) | (1 << COM2B1);
     TCCR2B = (1 << WGM22);
-
-    // config pre-scaler
-    TCCR2B |= (1 << CS22); // N=64
+    TCCR2B |= (1 << CS22); // config pre-scaler N=64
 
     // external interrup
     EICRA |= (1 << ISC01); // set INT0 to trigger on ANY logic change
@@ -85,8 +90,7 @@ int main(void)
     DDRC &= ~((1 << RV1) | (1 << RV2));
 
     // config output pin to PWM
-    DDRD |= (1 << PWM_OUTPUT) | (1 << PORTD4);
-    PORTD &= ~(1 << PORTD4);
+    DDRD |= (1 << PWM_OUTPUT);
 
     // port to display data
     DDRB = 0xFF;
@@ -112,11 +116,31 @@ int main(void)
     return 0;
 }
 
+ISR(ADC_vect)
+{
+    if (ADMUX & (1 << MUX0))
+    {
+        if (config_T)
+            duration_up = 100 + (ADCH / 255.0) * 100;
+        else
+            duration_down = 100 + (ADCH / 255.0) * 100;
+    }
+    else
+    {
+        if (config_T)
+            dutyCycle1 = 40 + (ADCH / 255.0) * 55;
+        else
+            dutyCycle2 = 40 + (ADCH / 255.0) * 55;
+    }
+    ADMUX ^= (1 << MUX0);
+}
+
 void configuration_mode()
 {
-    // ADCSRA |= (1 << ADEN) | (1 << ADSC); // initiates the conversion
+    ADCSRA |= (1 << ADEN) | (1 << ADSC); // initiates the conversion
 
     last_config_state = 0;
+    updateLCD_configMode();
 
     while (1)
     {
@@ -131,10 +155,7 @@ void configuration_mode()
             {
                 _delay_ms(BOUNCE_DELAY);
                 if (!(PIND & (1 << P2)))
-                {
-                    home_display();
                     break;
-                }
             }
         }
         last_config_state = config_state;
@@ -153,8 +174,31 @@ void configuration_mode()
         last_time_select_state = time_select_state;
 
         _delay_ms(BOUNCE_DELAY);
-        sprintf(&buffer[0], "Modo T%d", config_T);
+        updateLCD_configMode();
+    }
+    ADCSRA &= ~(1 << ADEN); // stop the conversion
+    home_display();
+}
+
+void updateLCD_configMode()
+{
+    if (config_T)
+    {
+        sprintf(&buffer[0], "T %d: %.1fs", 1, duration_up / 10.0);
         Lcd4_Set_Cursor(1, 0);
+        Lcd4_Write_String(buffer);
+        sprintf(&buffer[0], "C.U %d: %2d%%", 1, dutyCycle1);
+        Lcd4_Set_Cursor(2, 0);
+        Lcd4_Write_String(buffer);
+    }
+    else
+    {
+        // configuring T2
+        sprintf(&buffer[0], "T %d: %.1fs", 2, duration_down / 10.0);
+        Lcd4_Set_Cursor(1, 0);
+        Lcd4_Write_String(buffer);
+        sprintf(&buffer[0], "C.U %d: %2d%%", 2, dutyCycle2);
+        Lcd4_Set_Cursor(2, 0);
         Lcd4_Write_String(buffer);
     }
 }
@@ -162,7 +206,14 @@ void configuration_mode()
 void home_display()
 {
     Lcd4_Clear();
-    sprintf(&buffer[0], "Welcome");
+    sprintf(&buffer[0], "Hello World");
+    Lcd4_Set_Cursor(1, 0);
+    Lcd4_Write_String(buffer);
+
+    _delay_ms(1000);
+
+    Lcd4_Clear();
+    sprintf(&buffer[0], "Motor OFF");
     Lcd4_Set_Cursor(1, 0);
     Lcd4_Write_String(buffer);
 }
